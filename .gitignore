@@ -1,0 +1,24 @@
+# Java / Maven
+target/
+*.class
+*.jar
+*.war
+*.ear
+
+# IntelliJ / VS Code
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Docker / System
+.DS_Store
+Thumbs.db
+.env
+
+# Maven Wrapper
+.mvn/
+mvnw
+mvnw.cmd

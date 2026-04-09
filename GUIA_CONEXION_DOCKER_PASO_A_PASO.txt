@@ -1,0 +1,384 @@
+GUIA PASO A PASO - CONEXION DOCKER + SPRING CLOUD (INFRA + SERVICES)
+
+Objetivo
+- Levantar correctamente Config Server + microservicios catalogo/producto en Docker.
+- Entender como se conectan entre carpetas infra y services.
+- Tener una guia clara para repetir el proceso sin errores.
+
+------------------------------------------------------------
+1) ESTRUCTURA QUE TIENES
+------------------------------------------------------------
+- infra/
+  - config-repo/                (YML centralizados que entrega Config Server)
+  - config-server/              (servicio Spring Cloud Config Server)
+  - eureka-server/              (opcional, para service discovery)
+- services/
+  - catalogo/                   (microservicio + docker-compose)
+  - producto/                   (microservicio + docker-compose)
+
+Idea clave:
+- Los microservicios NO leen su config final desde su application.yml interno solamente.
+- Los microservicios primero llaman al Config Server (puerto 7071).
+- Config Server lee los archivos de infra/config-repo/*.yml y se los entrega.
+
+------------------------------------------------------------
+2) PROGRAMAS NECESARIOS
+------------------------------------------------------------
+Obligatorios:
+- Docker Desktop (Windows) con engine Linux activo.
+- Docker Compose v2 (ya viene con Docker Desktop como comando: docker compose).
+
+Recomendados:
+- PowerShell (terminal).
+- VS Code.
+- IntelliJ IDEA (Community o Ultimate) para compilar/ejecutar Spring facilmente.
+
+Solo si ejecutaras servicios Spring fuera de Docker:
+- Java 17.
+- Maven (o mvnw del proyecto).
+
+Tip para IntelliJ:
+- Abrir como proyecto raiz: D:\clase micros
+- Hacer "Reload All Maven Projects" para que reconozca dependencias.
+- Verificar SDK del proyecto en Java 17.
+
+Verificaciones rapidas:
+- docker --version
+- docker compose version
+- docker info
+
+------------------------------------------------------------
+3) CONFIGURACION MINIMA IMPORTANTE
+------------------------------------------------------------
+3.1 Config Server (infra/config-server)
+- Debe estar en puerto 7071.
+- Debe usar perfil native.
+- Debe apuntar a:
+  file:///D:/clase micros/infra/config-repo
+
+3.2 Microservicios dentro de Docker
+- Nunca usar localhost para llegar al Config Server si corre fuera del contenedor.
+- Deben usar host.docker.internal:7071.
+- En application.yml de cada microservicio:
+  spring.config.import=optional:configserver:${CONFIG_SERVER_URL:http://host.docker.internal:7071}
+
+3.3 Docker Compose
+- Cada servicio debe tener:
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+- Esto permite que el contenedor vea tu laptop (host).
+
+3.4 Perfil activo
+- En .env de catalogo y producto:
+  SPRING_PROFILES_ACTIVE=dev
+  CONFIG_SERVER_URL=http://host.docker.internal:7071
+
+3.5 Config repo (infra/config-repo)
+- catalogo-dev.yml y producto-dev.yml deben tener datasource por variables:
+  jdbc:mysql://${..._DB_HOST}:${..._DB_PORT}/${..._DB_NAME}...
+- Para actuator completo:
+  management.endpoints.web.exposure.include: "*"
+
+------------------------------------------------------------
+4) SOBRE POM Y DOCKERFILE (solo lo necesario)
+------------------------------------------------------------
+4.1 catalogo/pom.xml y producto/pom.xml
+- Deben incluir spring-cloud-starter-config.
+- Deben incluir springdoc-openapi-starter-webmvc-ui.
+- Mantener version de springdoc alineada para evitar diferencias de comportamiento.
+
+4.2 Dockerfile de catalogo/producto
+- Multi-stage con Maven + JRE esta correcto.
+- Debe exponer puerto correcto:
+  - catalogo: 8082
+  - producto: 8084
+
+4.3 BLOQUES EXACTOS DE DEPENDENCIAS POM (listos para copiar)
+
+Config Server (infra/config-server/pom.xml)
+- Dependencias minimas recomendadas:
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-config-server</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+- Dependency management requerido:
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-dependencies</artifactId>
+        <version>${spring-cloud.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+Catalogo (services/catalogo/pom.xml)
+- Dependencias clave para Spring Cloud + Swagger:
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-config</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <version>2.8.16</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-mysql</artifactId>
+    </dependency>
+  </dependencies>
+
+Producto (services/producto/pom.xml)
+- Debe usar el mismo bloque clave que catalogo.
+- Importante: dejar UNA sola dependencia springdoc (sin duplicados):
+  <dependency>
+    <groupId>org.springdoc</groupId>
+    <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+    <version>2.8.16</version>
+  </dependency>
+
+- Dependency management requerido (catalogo/producto):
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-dependencies</artifactId>
+        <version>${spring-cloud.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+------------------------------------------------------------
+5) COMPILAR Y EMPAQUETAR JAR (RECOMENDADO)
+------------------------------------------------------------
+Objetivo:
+- Confirmar que cada servicio compila bien antes de levantar Docker.
+
+Config Server:
+1) cd "D:\clase micros\infra\config-server"
+2) .\mvnw clean package -DskipTests
+3) Validar que exista: target\*.jar
+
+Catalogo:
+1) cd "D:\clase micros\services\catalogo"
+2) .\mvnw clean package -DskipTests
+3) Validar que exista: target\*.jar
+
+Producto:
+1) cd "D:\clase micros\services\producto"
+2) .\mvnw clean package -DskipTests
+3) Validar que exista: target\*.jar
+
+Equivalente en IntelliJ:
+- Abrir panel Maven (derecha) y ejecutar Lifecycle -> clean y luego package en cada modulo.
+- O crear Run Configuration tipo Maven con comando: clean package -DskipTests.
+
+Nota:
+- Tus Dockerfile ya construyen internamente con Maven (multi-stage).
+- Este empaquetado previo es para detectar errores temprano y tener control del build.
+
+------------------------------------------------------------
+6) ORDEN RECOMENDADO DE ARRANQUE
+------------------------------------------------------------
+PASO 1 - Levantar Config Server (fuera de Docker o en Docker)
+
+Opcion A (simple): correr Config Server fuera de Docker
+1) Ir a carpeta:
+   cd "D:\clase micros\infra\config-server"
+2) Ejecutar:
+   .\mvnw spring-boot:run
+3) Probar:
+   http://localhost:7071/catalogo/dev
+   http://localhost:7071/producto/dev
+
+Opcion B: correr Config Server en Docker
+- Si haces esto, los microservicios deberian apuntar al nombre del servicio de docker, no a host.docker.internal.
+- Si no tienes todo en un mismo compose, usa Opcion A para evitar complejidad.
+
+PASO 2 - Crear red compartida una sola vez
+- docker network create ms-net
+
+Si sale "already exists", es normal. Continuar.
+
+PASO 3 - Levantar catalogo
+1) cd "D:\clase micros\services\catalogo"
+2) docker compose down --remove-orphans
+3) docker compose up -d --build
+
+PASO 4 - Levantar producto
+1) cd "D:\clase micros\services\producto"
+2) docker compose down --remove-orphans
+3) docker compose up -d --build
+
+------------------------------------------------------------
+7) URLS DE VERIFICACION (CHECKLIST)
+------------------------------------------------------------
+Config Server:
+- http://localhost:7071/catalogo/dev
+- http://localhost:7071/producto/dev
+
+Catalogo:
+- http://localhost:8082/actuator/health
+- http://localhost:8082/actuator/env
+- http://localhost:8082/v3/api-docs
+- http://localhost:8082/swagger-ui/index.html
+- http://localhost:8082/api/v1/categorias
+
+Producto:
+- http://localhost:8084/actuator/health
+- http://localhost:8084/actuator/env
+- http://localhost:8084/v3/api-docs
+- http://localhost:8084/swagger-ui/index.html
+- http://localhost:8084/api/v1/productos
+
+------------------------------------------------------------
+8) ERRORES TIPICOS Y SOLUCION RAPIDA
+------------------------------------------------------------
+Error A: invalid interpolation format ... ${SPRING_PROFILES_ACTIVE:dev}
+Causa:
+- Sintaxis incorrecta en docker-compose.
+Solucion:
+- Usar ${SPRING_PROFILES_ACTIVE:-dev}
+- Usar ${CONFIG_SERVER_URL:-http://host.docker.internal:7071}
+
+Error B: network ms-net already exists
+Causa:
+- Ya habias creado la red antes.
+Solucion:
+- No recrearla. Continuar con docker compose up.
+
+Error C: microservicio no conecta al Config Server
+Causa:
+- Uso de localhost dentro del contenedor.
+Solucion:
+- Usar host.docker.internal:7071 + extra_hosts.
+
+Error D: intenta perfil prod cuando trabajas dev
+Causa:
+- .env con SPRING_PROFILES_ACTIVE=prod.
+Solucion:
+- Cambiar a dev en .env.
+
+Error E: Swagger /v3/api-docs da 500
+Causa comun:
+- Version springdoc incompatible o desalineada.
+Solucion:
+- Alinear springdoc entre servicios.
+- Revisar logs del contenedor.
+
+Error F: Eureka connection refused localhost:8761
+Causa:
+- Eureka no esta levantado o URL incorrecta desde contenedor.
+Solucion:
+- Levantar eureka-server o ajustar URL para Docker.
+
+Error G: Base de datos no conecta
+Causa:
+- En config-repo se dejo localhost/puerto host en lugar de nombre del contenedor.
+Solucion:
+- Usar variables *_DB_HOST=mysql-xxx y *_DB_PORT=3306 dentro de Docker.
+
+Error H: falla package en IntelliJ pero en terminal no
+Causa:
+- IntelliJ usa otro JDK o no recargo Maven.
+Solucion:
+- Ajustar Project SDK a Java 17.
+- Maven -> Reload All Projects.
+- Ejecutar clean package nuevamente.
+
+Error I: Docker build falla en paso Maven
+Causa:
+- Dependencias no descargadas, red lenta o cache corrupta.
+Solucion:
+- Reintentar build.
+- Probar primero .\mvnw clean package -DskipTests en host para validar.
+- Revisar proxy/certificados si estas en red corporativa.
+
+------------------------------------------------------------
+9) COMANDOS DE DIAGNOSTICO UTILES
+------------------------------------------------------------
+Ver contenedores activos:
+- docker ps
+
+Ver logs catalogo:
+- docker logs -f catalogo-prod-catalogo-1
+
+Ver logs producto:
+- docker logs -f producto-prod-producto-1
+
+Ver redes:
+- docker network ls
+
+Ver detalle de red:
+- docker network inspect ms-net
+
+Limpiar recursos no usados (usar con cuidado):
+- docker system prune
+- docker network prune
+
+Comprobar JAR generado rapidamente:
+- Get-ChildItem .\target\*.jar
+
+------------------------------------------------------------
+10) RESUMEN CORTO (MENTAL MODEL)
+------------------------------------------------------------
+- config-repo (infra) = fuente de verdad de propiedades.
+- config-server (infra) = servidor que publica esas propiedades.
+- catalogo/producto (services) = clientes config que arrancan leyendo config-server.
+- Docker de microservicios usa host.docker.internal para hablar con config-server en tu host.
+- DB dentro de Docker se resuelve por nombre de servicio de compose.
+
+Fin.
